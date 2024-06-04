@@ -1,12 +1,12 @@
 import streamlit as st
 import stripe
 import os
+import json
 
 # Load Stripe secret key and base URL from secrets.toml
 stripe.api_key = st.secrets["stripe"]["secret_key"]
 base_url = st.secrets["urls"]["base_url"]
 
-# Function to create a checkout session
 def create_checkout_session(amount, currency):
     try:
         session = stripe.checkout.Session.create(
@@ -15,7 +15,7 @@ def create_checkout_session(amount, currency):
                 'price_data': {
                     'currency': currency,
                     'product_data': {
-                        'name': 'TSA Questionnaire Result',
+                        'name': 'Résultat du questionnaire TSA',
                     },
                     'unit_amount': amount,
                 },
@@ -27,75 +27,92 @@ def create_checkout_session(amount, currency):
         )
         return session
     except Exception as e:
-        st.error(f"Error creating checkout session: {e}")
+        st.error(f"Erreur lors de la création de la session de paiement: {e}")
         return None
 
-# Page for the questionnaire
 def questionnaire_page():
-    st.title('TSA Questionnaire')
+    st.title('Questionnaire TSA')
 
     questions = [
-        "Do you find it difficult to understand people’s feelings?",
-        "Do you often notice small sounds when others do not?",
-        "Do you prefer to do things the same way over and over again?",
+        "Avez-vous du mal à comprendre les sentiments des autres ?",
+        "Remarquez-vous souvent de petits sons que les autres ne remarquent pas ?",
+        "Préférez-vous faire les choses de la même manière encore et encore ?",
+        "Avez-vous du mal à établir un contact visuel lorsque vous parlez aux gens ?",
+        "Aimez-vous collectionner des objets ou des informations sur des sujets spécifiques ?",
+        "Avez-vous du mal à suivre une conversation lorsqu'il y a du bruit autour de vous ?",
+        "Avez-vous des difficultés à comprendre les expressions idiomatiques ou les sarcasmes ?",
+        "Avez-vous besoin de routines et de planification pour vous sentir à l'aise ?",
+        "Avez-vous des intérêts particuliers qui prennent beaucoup de votre temps et de votre attention ?",
+        "Avez-vous du mal à interpréter les gestes et les expressions faciales des autres ?",
     ]
 
     responses = []
     for question in questions:
-        response = st.radio(question, ['Yes', 'No'])
+        response = st.selectbox(question, ['Tout à fait d’accord', 'D’accord', 'Neutre', 'Pas d’accord', 'Pas du tout d’accord'])
         responses.append(response)
 
-    if st.button('Submit'):
+    if st.button('Soumettre', key='submit'):
         st.session_state['responses'] = responses
-        st.write("### Your responses have been recorded.")
-        st.write("### To download your result, please proceed to payment.")
+        st.write("### Vos réponses ont été enregistrées.")
+        st.write("### Pour télécharger votre résultat, veuillez procéder au paiement.")
+
+        # Store responses in a temporary file
+        with open("temp_responses.json", "w") as f:
+            json.dump(responses, f)
+
         session = create_checkout_session(500, 'eur')  # 500 cents = 5 euros
         if session:
-            st.write("### Redirecting to Stripe Checkout...")
-            st.write(session.url)
             st.markdown(f"""
             <a href="{session.url}" target="_blank">
                 <button style="background-color:#4CAF50; color:white; padding: 10px 20px; border: none; cursor: pointer;">
-                    Go to Checkout
+                    Aller au paiement
                 </button>
             </a>
             """, unsafe_allow_html=True)
         else:
-            st.error("Failed to create a checkout session")
+            os.remove("temp_responses.json")  # Remove the temporary file if checkout session creation fails
+            st.error("Échec de la création d'une session de paiement")
 
-# Page for the success URL
 def success_page():
-    st.title("Payment Successful")
-    st.write("Thank you for your payment. You can now download your result.")
+    st.title("Paiement réussi")
+    st.write("Merci pour votre paiement. Vous pouvez maintenant télécharger votre résultat.")
 
-    if 'responses' in st.session_state:
+    if os.path.exists("temp_responses.json"):
+        # Load responses from the temporary file
+        with open("temp_responses.json", "r") as f:
+            responses = json.load(f)
+        st.session_state['responses'] = responses
+
         # Generate and offer the result download (for demonstration, we use a text file)
-        result_content = "Your TSA Questionnaire Result:\n\n" + "\n".join(st.session_state.get('responses', []))
+        result_content = "Votre résultat du questionnaire TSA:\n\n" + "\n".join(responses)
         result_file = "result.txt"
         with open(result_file, 'w') as f:
             f.write(result_content)
         with open(result_file, 'rb') as f:
             st.download_button(
-                label="Download Result",
+                label="Télécharger le résultat",
                 data=f,
-                file_name="TSA_Result.txt",
+                file_name="Resultat_TSA.txt",
                 mime="text/plain",
             )
         os.remove(result_file)
+        os.remove("temp_responses.json")  # Remove the temporary file after successful download
     else:
-        st.write("No responses to display.")
+        st.write("Aucune réponse à afficher.")
 
-# Page for the cancel URL
 def cancel_page():
-    st.title("Payment Cancelled")
-    st.write("Your payment was cancelled. Please try again.")
+    st.title("Paiement annulé")
+    st.write("Votre paiement a été annulé. Veuillez réessayer.")
 
-# Main app logic
+    if os.path.exists("temp_responses.json"):
+        os.remove("temp_responses.json")  # Remove the temporary file if payment is canceled
+
 def main():
+    st.set_page_config(page_title="Questionnaire TSA", page_icon=":brain:", layout="wide")
+
     if 'responses' not in st.session_state:
         st.session_state['responses'] = []
 
-    # Update query parameter handling to use st.experimental_get_query_params
     query_params = st.experimental_get_query_params()
     page = query_params.get("page", ["questionnaire"])[0]
 
